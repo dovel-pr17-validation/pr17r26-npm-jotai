@@ -1,0 +1,125 @@
+---
+title: Async
+nav: 3.03
+keywords: async,unwrap,observable,loadable
+---
+
+All atoms support async behavior such as async read or async write. However there are APIs for more control described here.
+
+## unwrap
+
+The `unwrap` util converts an async atom to a synchronous atom, making it
+easier to derive other atoms from its resolved value. While the promise is
+pending, it returns `undefined` or a configurable fallback, which can use
+the previous resolved value. Errors are not caught and are thrown when
+the atom is read.
+
+This is useful because `get` in an atom's read function returns promises
+as-is rather than resolving them.
+
+### Signature
+
+```ts
+function unwrap<Value, Args extends unknown[], Result>(
+  anAtom: WritableAtom<Value, Args, Result>,
+): WritableAtom<Awaited<Value> | undefined, Args, Result>
+
+function unwrap<Value, Args extends unknown[], Result, PendingValue>(
+  anAtom: WritableAtom<Value, Args, Result>,
+  fallback: (prev?: Awaited<Value>) => PendingValue,
+): WritableAtom<Awaited<Value> | PendingValue, Args, Result>
+
+function unwrap<Value>(anAtom: Atom<Value>): Atom<Awaited<Value> | undefined>
+
+function unwrap<Value, PendingValue>(
+  anAtom: Atom<Value>,
+  fallback: (prev?: Awaited<Value>) => PendingValue,
+): Atom<Awaited<Value> | PendingValue>
+```
+
+### Usage
+
+```tsx
+import { atom } from 'jotai'
+import { unwrap } from 'jotai/utils'
+
+const countAtom = atom(0)
+const delayedCountAtom = atom(async (get) => {
+  await new Promise((r) => setTimeout(r, 500))
+  return get(countAtom)
+})
+
+const unwrapped1Atom = unwrap(delayedCountAtom)
+// The value is `undefined` while pending
+
+const unwrapped2Atom = unwrap(delayedCountAtom, (prev) => prev ?? 0)
+// The value is `0` initially, and subsequent updates keep the previous value.
+```
+
+## atomWithObservable
+
+Ref: https://github.com/pmndrs/jotai/pull/341
+
+### Usage
+
+```jsx
+import { useAtom } from 'jotai'
+import { atomWithObservable } from 'jotai/utils'
+import { interval } from 'rxjs'
+import { map } from 'rxjs/operators'
+
+const counterSubject = interval(1000).pipe(map((i) => `#${i}`))
+const counterAtom = atomWithObservable(() => counterSubject)
+
+const Counter = () => {
+  const [counter] = useAtom(counterAtom)
+  return <div>count: {counter}</div>
+}
+```
+
+The `atomWithObservable` function creates an atom from a rxjs (or similar) `subject` or `observable`.
+Its value will be last value emitted from the stream.
+
+To use this atom, you need to wrap your component with `<Suspense>`. Check out [guides/async](../guides/async.mdx).
+
+### Initial value
+
+`atomWithObservable` takes second optional parameter `{ initialValue }` that allows to specify initial value for the atom. If `initialValue` is provided then `atomWithObservable` will not suspend and will show initial value before receiving first value from observable. `initialValue` can be either a value or a function that returns a value
+
+```js
+const counterAtom = atomWithObservable(() => counterSubject, {
+  initialValue: 10,
+})
+
+const counterAtom2 = atomWithObservable(() => counterSubject, {
+  initialValue: () => Math.random(),
+})
+```
+
+### Stackblitz
+
+<Stackblitz id="vitejs-vite-3bkqrb" file="src%2FApp.tsx" />
+
+## Related APIs
+
+- [`atomWithRefresh`](./resettable.mdx#atomwithrefresh): re-evaluates an atom's
+  read function to refresh data or retry a request.
+- [`useAtomValueRaw`](../core/use-atom.mdx#useatomvalueraw): reads an atom's
+  value without resolving promises or suspending.
+- [`useAtomValueRawSync`](../core/use-atom.mdx#useatomvaluerawsync): the same
+  as `useAtomValueRaw`, but uses `useSyncExternalStore` to avoid tearing
+  and catch updates during mount.
+
+## loadable
+
+The `loadable` util has been removed from `jotai/utils` in Jotai v3.
+
+Use [`unwrap`](#unwrap) to derive a synchronous atom from an async atom
+with a configurable fallback while loading. Errors are still thrown.
+For reading an async atom's value in a component without suspending, see
+[`useAtomValueRaw`](../core/use-atom.mdx#useatomvalueraw) and
+[`useAtomValueRawSync`](../core/use-atom.mdx#useatomvaluerawsync).
+
+If you need to preserve the previous `loading`, `hasData`, and `hasError`
+states, see the [v3 migration guide](../guides/migrating-to-v3.mdx#loadable)
+for a userland replacement built on `unwrap`.
